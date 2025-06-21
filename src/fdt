@@ -225,7 +225,11 @@ cmd_validate() {
             if [ "$argc_json" != 1 ]; then
                 local username=$(echo "$response" | jq -r '.username // "N/A"')
                 local user_id=$(echo "$response" | jq -r '.id // "N/A"')
-                printf "    ${blue}User: %s (ID: %s)${reset}\n\n" "$username" "$user_id"
+                local email=$(echo "$response" | jq -r '.email // "N/A"')
+                local phone=$(echo "$response" | jq -r '.phone // "N/A"')
+                printf "    ${blue}User: %s (ID: %s)${reset}\n" "$username" "$user_id"
+                printf "    ${blue}Email: %s${reset}\n" "$email"
+                printf "    ${blue}Phone: %s${reset}\n\n" "$phone"
             fi
 
             local token_result=$(echo "$response" | jq --arg token "$token" '. + {token: $token, status: "valid"}')
@@ -305,7 +309,11 @@ cmd_check() {
             printf "${green}[✓] Token is valid${reset}\n"
             local username=$(echo "$response" | jq -r '.username // "N/A"')
             local user_id=$(echo "$response" | jq -r '.id // "N/A"')
+            local email=$(echo "$response" | jq -r '.email // "N/A"')
+            local phone=$(echo "$response" | jq -r '.phone // "N/A"')
             printf "${blue}User: %s (ID: %s)${reset}\n" "$username" "$user_id"
+            printf "${blue}Email: %s${reset}\n" "$email"
+            printf "${blue}Phone: %s${reset}\n" "$phone"
 
             save_valid_token "$argc_token" "$response"
         fi
