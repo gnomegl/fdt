@@ -10,7 +10,6 @@
 # @flag   -s --silent "Suppress loading animations"
 # @flag   -j --json "Output results as JSON"
 # @flag   -q --quiet "Suppress colored output"
-# @flag   -n --no-save "Don't save valid tokens to files"
 # @meta require-tools curl,rg,jq
 
 eval "$(argc --argc-eval "$0" "$@")"
