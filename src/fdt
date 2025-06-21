@@ -28,327 +28,334 @@ setup_colors
 
 LOADING_CHARS="⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
 
-show_loading() {
-    local token="$1"
-    local pid="$2"
-    local counter=0
+show_progress_bar() {
+  local current="$1"
+  local total="$2"
+  local width=6
 
-    [ "$argc_silent" = 1 ] && return
+  [ "$argc_silent" = 1 ] && return
 
-    while kill -0 $pid 2>/dev/null; do
-        char=${LOADING_CHARS:$((counter % ${#LOADING_CHARS})):1}
-        printf "\r${blue}[${char}]${reset} Checking: ${token:0:20}..."
-        counter=$((counter + 1))
-        sleep 0.1
-    done
+  local percentage=$((current * 100 / total))
+  local filled=$((width * current / total))
+  local empty=$((width - filled))
+
+  printf "\r["
+  [ $filled -gt 0 ] && printf "%0.s█" $(seq 1 $filled)
+  [ $empty -gt 0 ] && printf "%0.s░" $(seq 1 $empty)
+  printf "] %3d%% (%d/%d)" "$percentage" "$current" "$total"
 }
 
 validate_token() {
-    local token="$1"
-    local response
+  local token="$1"
+  local response
 
-    response=$(curl -s -H "Authorization: $token" https://discord.com/api/v10/users/@me 2>/dev/null)
+  response=$(curl -s -H "Authorization: $token" https://discord.com/api/v10/users/@me 2>/dev/null)
 
-    if echo "$response" | grep -q '"id"'; then
-        echo "$response"
-        return 0
-    else
-        return 1
-    fi
+  if echo "$response" | grep -q '"id"'; then
+    echo "$response"
+    return 0
+  else
+    return 1
+  fi
 }
 
 extract_tokens() {
-    local search_path="$1"
-    local temp_tokens=$(mktemp)
+  local search_path="$1"
+  local temp_tokens=$(mktemp)
 
-    if [ ! -e "$search_path" ]; then
-        printf "${red}Error:${reset} Path '%s' does not exist\n" "$search_path" >&2
-        return 1
-    fi
+  if [ ! -e "$search_path" ]; then
+    printf "${red}Error:${reset} Path '%s' does not exist\n" "$search_path" >&2
+    return 1
+  fi
 
-    local rg_args="-oe"
-    [ "$argc_recursive" = 1 ] && rg_args="$rg_args -r"
+  local rg_args="-oe"
+  [ "$argc_recursive" = 1 ] && rg_args="$rg_args -r"
 
-    # Discord token regex patterns
-    local token_pattern='\b[A-Za-z0-9_-]{24}\.[A-Za-z0-9_-]{6}\.[A-Za-z0-9_-]{27}\b|\b[A-Za-z0-9_-]{24}\.[A-Za-z0-9_-]{6}\.[A-Za-z0-9_-]{38}\b'
+  # Discord token regex patterns
+  local token_pattern='\b[A-Za-z0-9_-]{24}\.[A-Za-z0-9_-]{6}\.[A-Za-z0-9_-]{27}\b|\b[A-Za-z0-9_-]{24}\.[A-Za-z0-9_-]{6}\.[A-Za-z0-9_-]{38}\b'
 
-    if [ -d "$search_path" ]; then
-        rg $rg_args "$token_pattern" "$search_path" --no-filename --no-line-number 2>/dev/null | sort -u > "$temp_tokens"
-    elif [ -f "$search_path" ]; then
-        rg $rg_args "$token_pattern" "$search_path" --no-filename --no-line-number 2>/dev/null | sort -u > "$temp_tokens"
-    else
-        printf "${red}Error:${reset} Invalid path type\n" >&2
-        rm "$temp_tokens"
-        return 1
-    fi
+  if [ -d "$search_path" ]; then
+    rg $rg_args "$token_pattern" "$search_path" --no-filename --no-line-number 2>/dev/null | sort -u >"$temp_tokens"
+  elif [ -f "$search_path" ]; then
+    rg $rg_args "$token_pattern" "$search_path" --no-filename --no-line-number 2>/dev/null | sort -u >"$temp_tokens"
+  else
+    printf "${red}Error:${reset} Invalid path type\n" >&2
+    rm "$temp_tokens"
+    return 1
+  fi
 
-    echo "$temp_tokens"
+  echo "$temp_tokens"
 }
 
 save_valid_token() {
-    local token="$1"
-    local response="$2"
-    local timestamp=$(date +%s)
-    local filename
+  local token="$1"
+  local response="$2"
+  local timestamp=$(date +%s)
+  local filename
 
+  case "$argc_format" in
+  json)
+    filename="${argc_output:-.}/valid_token_${timestamp}.json"
+    echo "$response" | jq . >"$filename"
+    ;;
+  txt)
+    filename="${argc_output:-.}/valid_token_${timestamp}.txt"
+    echo "$token" >"$filename"
+    ;;
+  csv)
+    filename="${argc_output:-.}/valid_tokens.csv"
+    if [ ! -f "$filename" ]; then
+      echo "token,username,user_id,timestamp" >"$filename"
+    fi
+    local username=$(echo "$response" | jq -r '.username // "N/A"')
+    local user_id=$(echo "$response" | jq -r '.id // "N/A"')
+    echo "$token,$username,$user_id,$(date -Iseconds)" >>"$filename"
+    ;;
+  esac
 
-    case "$argc_format" in
-        json)
-            filename="${argc_output:-.}/valid_token_${timestamp}.json"
-            echo "$response" | jq . > "$filename"
-            ;;
-        txt)
-            filename="${argc_output:-.}/valid_token_${timestamp}.txt"
-            echo "$token" > "$filename"
-            ;;
-        csv)
-            filename="${argc_output:-.}/valid_tokens.csv"
-            if [ ! -f "$filename" ]; then
-                echo "token,username,user_id,timestamp" > "$filename"
-            fi
-            local username=$(echo "$response" | jq -r '.username // "N/A"')
-            local user_id=$(echo "$response" | jq -r '.id // "N/A"')
-            echo "$token,$username,$user_id,$(date -Iseconds)" >> "$filename"
-            ;;
-    esac
-
-    printf "    ${green}Token saved to: %s${reset}\n" "$filename"
+  printf "    ${green}Token saved to: %s${reset}\n" "$filename"
 }
 
 format_results() {
-    local total="$1"
-    local valid="$2"
-    local invalid="$3"
-    local results="$4"
+  local total="$1"
+  local valid="$2"
+  local invalid="$3"
+  local results="$4"
 
-    if [ "$argc_json" = 1 ]; then
-        jq -n \
-            --arg total "$total" \
-            --arg valid "$valid" \
-            --arg invalid "$invalid" \
-            --argjson results "$results" \
-            '{
+  if [ "$argc_json" = 1 ]; then
+    jq -n \
+      --arg total "$total" \
+      --arg valid "$valid" \
+      --arg invalid "$invalid" \
+      --argjson results "$results" \
+      '{
                 total_tokens: ($total | tonumber),
                 valid_tokens: ($valid | tonumber),
                 invalid_tokens: ($invalid | tonumber),
                 results: $results
             }'
-    else
-        printf "\n${bold}${blue}Validation Complete${reset}\n"
-        printf "${bold}${blue}==================${reset}\n"
-        printf "${bold}Total tokens checked:${reset} %s\n" "$total"
-        printf "${bold}Valid tokens found:${reset} ${green}%s${reset}\n" "$valid"
-        printf "${bold}Invalid tokens:${reset} ${red}%s${reset}\n" "$invalid"
+  else
+    printf "\n${bold}${blue}Validation Complete${reset}\n"
+    printf "${bold}${blue}==================${reset}\n"
+    printf "${bold}Total tokens checked:${reset} %s\n" "$total"
+    printf "${bold}Valid tokens found:${reset} ${green}%s${reset}\n" "$valid"
+    printf "${bold}Invalid tokens:${reset} ${red}%s${reset}\n" "$invalid"
 
-        if [ "$valid" -gt 0 ]; then
-            printf "\n${green}Valid tokens have been saved to %s format${reset}\n" "$argc_format"
-        fi
+    if [ "$valid" -gt 0 ]; then
+      printf "\n${green}Valid tokens have been saved to %s format${reset}\n" "$argc_format"
     fi
+  fi
 }
 
 show_help() {
-    echo "${bold}Discord Token Validator${reset}"
-    echo ""
-    echo "${bold}Commands:${reset}"
-    echo "  ${cyan}validate${reset}     Extract and validate tokens from files/directories"
-    echo "  ${cyan}extract${reset}      Extract tokens without validation"
-    echo "  ${cyan}check${reset}        Validate a single token"
-    echo ""
-    echo "${bold}Examples:${reset}"
-    echo "  ${green}$(basename "$0") validate .${reset}                    # Validate tokens in current directory"
-    echo "  ${green}$(basename "$0") validate /path/to/logs --recursive${reset} # Recursive search"
-    echo "  ${green}$(basename "$0") check --token 'TOKEN_HERE'${reset}     # Check single token"
-    echo "  ${green}$(basename "$0") extract ./logs --format csv${reset}    # Extract to CSV format"
-    echo ""
-    echo "${bold}Options:${reset}"
-    echo "  ${yellow}-t, --token${reset}      Single token to validate"
-    echo "  ${yellow}-o, --output${reset}     Output directory for results"
-    echo "  ${yellow}-f, --format${reset}     Output format (json, txt, csv)"
-    echo "  ${yellow}-r, --recursive${reset}  Search recursively"
-    echo "  ${yellow}-s, --silent${reset}     Suppress loading animations"
-    echo "  ${yellow}-j, --json${reset}       JSON output format"
-    echo "  ${yellow}-n, --no-save${reset}    Don't save valid tokens"
+  echo "${bold}Discord Token Validator${reset}"
+  echo ""
+  echo "${bold}Commands:${reset}"
+  echo "  ${cyan}validate${reset}     Extract and validate tokens from files/directories"
+  echo "  ${cyan}extract${reset}      Extract tokens without validation"
+  echo "  ${cyan}check${reset}        Validate a single token"
+  echo ""
+  echo "${bold}Examples:${reset}"
+  echo "  ${green}$(basename "$0") validate .${reset}                    # Validate tokens in current directory"
+  echo "  ${green}$(basename "$0") validate /path/to/logs --recursive${reset} # Recursive search"
+  echo "  ${green}$(basename "$0") check --token 'TOKEN_HERE'${reset}     # Check single token"
+  echo "  ${green}$(basename "$0") extract ./logs --format csv${reset}    # Extract to CSV format"
+  echo ""
+  echo "${bold}Options:${reset}"
+  echo "  ${yellow}-t, --token${reset}      Single token to validate"
+  echo "  ${yellow}-o, --output${reset}     Output directory for results"
+  echo "  ${yellow}-f, --format${reset}     Output format (json, txt, csv)"
+  echo "  ${yellow}-r, --recursive${reset}  Search recursively"
+  echo "  ${yellow}-s, --silent${reset}     Suppress loading animations"
+  echo "  ${yellow}-j, --json${reset}       JSON output format"
+  echo "  ${yellow}-n, --no-save${reset}    Don't save valid tokens"
 }
 
 cmd_validate() {
-    local search_path="${argc_path:-.}"
-    local temp_tokens
-    local total_tokens=0
-    local valid_tokens=0
-    local results="[]"
+  local search_path="${argc_path:-.}"
+  local temp_tokens
+  local total_tokens=0
+  local valid_tokens=0
+  local results="[]"
 
-    [ "$argc_json" != 1 ] && printf "${bold}${blue}Discord Token Validator${reset}\n"
-    [ "$argc_json" != 1 ] && printf "${bold}${blue}=======================${reset}\n\n"
+  [ "$argc_json" != 1 ] && printf "${bold}${blue}Discord Token Validator${reset}\n"
+  [ "$argc_json" != 1 ] && printf "${bold}${blue}=======================${reset}\n\n"
 
-    # Extract tokens
-    [ "$argc_json" != 1 ] && printf "${blue}Extracting tokens from: %s${reset}\n" "$search_path"
+  # Extract tokens
+  [ "$argc_json" != 1 ] && printf "${blue}Extracting tokens from: %s${reset}\n" "$search_path"
 
-    temp_tokens=$(extract_tokens "$search_path")
-    [ $? -ne 0 ] && exit 1
+  temp_tokens=$(extract_tokens "$search_path")
+  [ $? -ne 0 ] && exit 1
 
-    total_tokens=$(wc -l < "$temp_tokens")
+  total_tokens=$(wc -l <"$temp_tokens")
 
-    if [ "$total_tokens" -eq 0 ]; then
-        [ "$argc_json" != 1 ] && printf "${red}No Discord tokens found.${reset}\n"
-        rm "$temp_tokens"
-        [ "$argc_json" = 1 ] && echo '{"total_tokens": 0, "valid_tokens": 0, "invalid_tokens": 0, "results": []}'
-        exit 0
+  if [ "$total_tokens" -eq 0 ]; then
+    [ "$argc_json" != 1 ] && printf "${red}No Discord tokens found.${reset}\n"
+    rm "$temp_tokens"
+    [ "$argc_json" = 1 ] && echo '{"total_tokens": 0, "valid_tokens": 0, "invalid_tokens": 0, "results": []}'
+    exit 0
+  fi
+
+  [ "$argc_json" != 1 ] && printf "${blue}Found %s unique tokens. Starting validation...${reset}\n\n" "$total_tokens"
+
+  # Process each token
+  local current_token=0
+  local success_buffer=""
+
+  # Save cursor position and clear space for progress bar
+  [ "$argc_json" != 1 ] && [ "$argc_silent" != 1 ] && printf "\n"
+
+  while read -r token; do
+    [ -z "$token" ] && continue
+    current_token=$((current_token + 1))
+
+    # Update progress bar at current position
+    [ "$argc_json" != 1 ] && show_progress_bar "$current_token" "$total_tokens"
+
+    response=$(validate_token "$token")
+
+    if [ $? -eq 0 ] && [ -n "$response" ]; then
+      # Clear progress bar line, print success message
+      if [ "$argc_json" != 1 ] && [ "$argc_silent" != 1 ]; then
+        printf "\r\033[K" # Clear current line
+        printf "${green}[✓]${reset} Valid token found: ${token:0:20}...\n"
+      fi
+
+      save_valid_token "$token" "$response"
+
+      if [ "$argc_json" != 1 ]; then
+        local username=$(echo "$response" | jq -r '.username // "N/A"')
+        local user_id=$(echo "$response" | jq -r '.id // "N/A"')
+        local email=$(echo "$response" | jq -r '.email // "N/A"')
+        local phone=$(echo "$response" | jq -r '.phone // "N/A"')
+        printf "    ${blue}User: %s (ID: %s)${reset}\n" "$username" "$user_id"
+        printf "    ${blue}Email: %s${reset}\n" "$email"
+        printf "    ${blue}Phone: %s${reset}\n" "$phone"
+      fi
+
+      local token_result=$(echo "$response" | jq --arg token "$token" '. + {token: $token, status: "valid"}')
+      results=$(echo "$results" | jq --argjson item "$token_result" '. + [$item]')
+
+      valid_tokens=$((valid_tokens + 1))
+
+      # Redraw progress bar after success output
+      [ "$argc_json" != 1 ] && show_progress_bar "$current_token" "$total_tokens"
+    else
+      # Just update the result for invalid tokens, don't print anything
+      local token_result=$(jq -n --arg token "$token" '{token: $token, status: "invalid"}')
+      results=$(echo "$results" | jq --argjson item "$token_result" '. + [$item]')
     fi
 
-    [ "$argc_json" != 1 ] && printf "${blue}Found %s unique tokens. Starting validation...${reset}\n\n" "$total_tokens"
+  done <"$temp_tokens"
 
-    # Process each token
-    while read -r token; do
-        [ -z "$token" ] && continue
+  # Clear the progress bar line after completion
+  [ "$argc_json" != 1 ] && [ "$argc_silent" != 1 ] && printf "\r\033[K"
 
-        # Start validation in background
-        (
-            response=$(validate_token "$token")
-            echo "$response" > "/tmp/discord_response_$$"
-            echo $? > "/tmp/discord_status_$$"
-        ) &
+  rm "$temp_tokens"
 
-        bg_pid=$!
-        show_loading "$token" $bg_pid
-        wait $bg_pid
-
-        response=$(cat "/tmp/discord_response_$$" 2>/dev/null)
-        status=$(cat "/tmp/discord_status_$$" 2>/dev/null)
-        rm -f "/tmp/discord_response_$$" "/tmp/discord_status_$$"
-
-        if [ "$status" = "0" ] && [ -n "$response" ]; then
-            [ "$argc_silent" != 1 ] && printf "\r${green}[✓]${reset} Valid token found: ${token:0:20}...\n"
-
-            save_valid_token "$token" "$response"
-
-            if [ "$argc_json" != 1 ]; then
-                local username=$(echo "$response" | jq -r '.username // "N/A"')
-                local user_id=$(echo "$response" | jq -r '.id // "N/A"')
-                local email=$(echo "$response" | jq -r '.email // "N/A"')
-                local phone=$(echo "$response" | jq -r '.phone // "N/A"')
-                printf "    ${blue}User: %s (ID: %s)${reset}\n" "$username" "$user_id"
-                printf "    ${blue}Email: %s${reset}\n" "$email"
-                printf "    ${blue}Phone: %s${reset}\n\n" "$phone"
-            fi
-
-            local token_result=$(echo "$response" | jq --arg token "$token" '. + {token: $token, status: "valid"}')
-            results=$(echo "$results" | jq --argjson item "$token_result" '. + [$item]')
-
-            valid_tokens=$((valid_tokens + 1))
-        else
-            [ "$argc_silent" != 1 ] && printf "\r${red}[✗]${reset} Invalid token: ${token:0:20}...\n"
-
-            local token_result=$(jq -n --arg token "$token" '{token: $token, status: "invalid"}')
-            results=$(echo "$results" | jq --argjson item "$token_result" '. + [$item]')
-        fi
-
-    done < "$temp_tokens"
-
-    rm "$temp_tokens"
-
-    format_results "$total_tokens" "$valid_tokens" "$((total_tokens - valid_tokens))" "$results"
+  format_results "$total_tokens" "$valid_tokens" "$((total_tokens - valid_tokens))" "$results"
 }
 
 cmd_extract() {
-    local search_path="${argc_path:-.}"
-    local temp_tokens
-    local total_tokens=0
+  local search_path="${argc_path:-.}"
+  local temp_tokens
+  local total_tokens=0
 
-    temp_tokens=$(extract_tokens "$search_path")
-    [ $? -ne 0 ] && exit 1
+  temp_tokens=$(extract_tokens "$search_path")
+  [ $? -ne 0 ] && exit 1
 
-    total_tokens=$(wc -l < "$temp_tokens")
+  total_tokens=$(wc -l <"$temp_tokens")
 
-    if [ "$total_tokens" -eq 0 ]; then
-        [ "$argc_json" != 1 ] && printf "${red}No Discord tokens found.${reset}\n"
-        [ "$argc_json" = 1 ] && echo '{"total_tokens": 0, "tokens": []}'
-        rm "$temp_tokens"
-        exit 0
-    fi
-
-    if [ "$argc_json" = 1 ]; then
-        local tokens_json="[]"
-        while read -r token; do
-            [ -z "$token" ] && continue
-            tokens_json=$(echo "$tokens_json" | jq --arg token "$token" '. + [$token]')
-        done < "$temp_tokens"
-
-        jq -n \
-            --arg total "$total_tokens" \
-            --argjson tokens "$tokens_json" \
-            '{total_tokens: ($total | tonumber), tokens: $tokens}'
-    else
-        printf "${bold}${blue}Extracted Tokens${reset}\n"
-        printf "${bold}${blue}===============${reset}\n"
-        printf "${bold}Total tokens found:${reset} %s\n\n" "$total_tokens"
-
-        local counter=1
-        while read -r token; do
-            [ -z "$token" ] && continue
-            printf "${cyan}%2d.${reset} %s\n" "$counter" "$token"
-            counter=$((counter + 1))
-        done < "$temp_tokens"
-    fi
-
+  if [ "$total_tokens" -eq 0 ]; then
+    [ "$argc_json" != 1 ] && printf "${red}No Discord tokens found.${reset}\n"
+    [ "$argc_json" = 1 ] && echo '{"total_tokens": 0, "tokens": []}'
     rm "$temp_tokens"
+    exit 0
+  fi
+
+  if [ "$argc_json" = 1 ]; then
+    local tokens_json="[]"
+    while read -r token; do
+      [ -z "$token" ] && continue
+      tokens_json=$(echo "$tokens_json" | jq --arg token "$token" '. + [$token]')
+    done <"$temp_tokens"
+
+    jq -n \
+      --arg total "$total_tokens" \
+      --argjson tokens "$tokens_json" \
+      '{total_tokens: ($total | tonumber), tokens: $tokens}'
+  else
+    printf "${bold}${blue}Extracted Tokens${reset}\n"
+    printf "${bold}${blue}===============${reset}\n"
+    printf "${bold}Total tokens found:${reset} %s\n\n" "$total_tokens"
+
+    local counter=1
+    while read -r token; do
+      [ -z "$token" ] && continue
+      printf "${cyan}%2d.${reset} %s\n" "$counter" "$token"
+      counter=$((counter + 1))
+    done <"$temp_tokens"
+  fi
+
+  rm "$temp_tokens"
 }
 
 cmd_check() {
-    if [ -z "$argc_token" ]; then
-        printf "${red}Error:${reset} Token is required for check command\n" >&2
-        exit 1
-    fi
+  if [ -z "$argc_token" ]; then
+    printf "${red}Error:${reset} Token is required for check command\n" >&2
+    exit 1
+  fi
 
-    [ "$argc_json" != 1 ] && printf "${blue}Validating token: %s...${reset}\n" "${argc_token:0:20}"
+  [ "$argc_json" != 1 ] && printf "${blue}Validating token: %s...${reset}\n" "${argc_token:0:20}"
 
-    if response=$(validate_token "$argc_token"); then
-        if [ "$argc_json" = 1 ]; then
-            echo "$response" | jq '. + {token: $token, status: "valid"}' --arg token "$argc_token"
-        else
-            printf "${green}[✓] Token is valid${reset}\n"
-            local username=$(echo "$response" | jq -r '.username // "N/A"')
-            local user_id=$(echo "$response" | jq -r '.id // "N/A"')
-            local email=$(echo "$response" | jq -r '.email // "N/A"')
-            local phone=$(echo "$response" | jq -r '.phone // "N/A"')
-            printf "${blue}User: %s (ID: %s)${reset}\n" "$username" "$user_id"
-            printf "${blue}Email: %s${reset}\n" "$email"
-            printf "${blue}Phone: %s${reset}\n" "$phone"
-
-            save_valid_token "$argc_token" "$response"
-        fi
+  if response=$(validate_token "$argc_token"); then
+    if [ "$argc_json" = 1 ]; then
+      echo "$response" | jq '. + {token: $token, status: "valid"}' --arg token "$argc_token"
     else
-        if [ "$argc_json" = 1 ]; then
-            jq -n --arg token "$argc_token" '{token: $token, status: "invalid"}'
-        else
-            printf "${red}[✗] Token is invalid${reset}\n"
-        fi
-        exit 1
+      printf "${green}[✓] Token is valid${reset}\n"
+      local username=$(echo "$response" | jq -r '.username // "N/A"')
+      local user_id=$(echo "$response" | jq -r '.id // "N/A"')
+      local email=$(echo "$response" | jq -r '.email // "N/A"')
+      local phone=$(echo "$response" | jq -r '.phone // "N/A"')
+      printf "${blue}User: %s (ID: %s)${reset}\n" "$username" "$user_id"
+      printf "${blue}Email: %s${reset}\n" "$email"
+      printf "${blue}Phone: %s${reset}\n" "$phone"
+
+      save_valid_token "$argc_token" "$response"
     fi
+  else
+    if [ "$argc_json" = 1 ]; then
+      jq -n --arg token "$argc_token" '{token: $token, status: "invalid"}'
+    else
+      printf "${red}[✗] Token is invalid${reset}\n"
+    fi
+    exit 1
+  fi
 }
 
 if [ -z "$argc_command" ]; then
-    show_help
-    exit 0
+  show_help
+  exit 0
 fi
 
 # Only create output directory if it's specified and not empty
 if [ -n "$argc_output" ]; then
-    mkdir -p "$argc_output"
+  mkdir -p "$argc_output"
 fi
 
 case "$argc_command" in
-    validate)
-        cmd_validate
-        ;;
-    extract)
-        cmd_extract
-        ;;
-    check)
-        cmd_check
-        ;;
-    *)
-        printf "${red}Error:${reset} Unknown command: %s\n" "$argc_command" >&2
-        show_help
-        exit 1
-        ;;
+validate)
+  cmd_validate
+  ;;
+extract)
+  cmd_extract
+  ;;
+check)
+  cmd_check
+  ;;
+*)
+  printf "${red}Error:${reset} Unknown command: %s\n" "$argc_command" >&2
+  show_help
+  exit 1
+  ;;
 esac

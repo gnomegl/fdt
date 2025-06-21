@@ -342,19 +342,21 @@ setup_colors
 
 LOADING_CHARS="⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
 
-show_loading() {
-    local token="$1"
-    local pid="$2"
-    local counter=0
-
+show_progress_bar() {
+    local current="$1"
+    local total="$2"
+    local width=6
+    
     [ "$argc_silent" = 1 ] && return
-
-    while kill -0 $pid 2>/dev/null; do
-        char=${LOADING_CHARS:$((counter % ${#LOADING_CHARS})):1}
-        printf "\r${blue}[${char}]${reset} Checking: ${token:0:20}..."
-        counter=$((counter + 1))
-        sleep 0.1
-    done
+    
+    local percentage=$((current * 100 / total))
+    local filled=$((width * current / total))
+    local empty=$((width - filled))
+    
+    printf "\r["
+    [ $filled -gt 0 ] && printf "%0.s█" $(seq 1 $filled)
+    [ $empty -gt 0 ] && printf "%0.s░" $(seq 1 $empty)
+    printf "] %3d%% (%d/%d)" "$percentage" "$current" "$total"
 }
 
 validate_token() {
@@ -512,29 +514,30 @@ cmd_validate() {
     [ "$argc_json" != 1 ] && printf "${blue}Found %s unique tokens. Starting validation...${reset}\n\n" "$total_tokens"
 
     # Process each token
+    local current_token=0
+    local success_buffer=""
+    
+    # Save cursor position and clear space for progress bar
+    [ "$argc_json" != 1 ] && [ "$argc_silent" != 1 ] && printf "\n"
+    
     while read -r token; do
         [ -z "$token" ] && continue
-
-        # Start validation in background
-        (
-            response=$(validate_token "$token")
-            echo "$response" > "/tmp/discord_response_$$"
-            echo $? > "/tmp/discord_status_$$"
-        ) &
-
-        bg_pid=$!
-        show_loading "$token" $bg_pid
-        wait $bg_pid
-
-        response=$(cat "/tmp/discord_response_$$" 2>/dev/null)
-        status=$(cat "/tmp/discord_status_$$" 2>/dev/null)
-        rm -f "/tmp/discord_response_$$" "/tmp/discord_status_$$"
-
-        if [ "$status" = "0" ] && [ -n "$response" ]; then
-            [ "$argc_silent" != 1 ] && printf "\r${green}[✓]${reset} Valid token found: ${token:0:20}...\n"
-
+        current_token=$((current_token + 1))
+        
+        # Update progress bar at current position
+        [ "$argc_json" != 1 ] && show_progress_bar "$current_token" "$total_tokens"
+        
+        response=$(validate_token "$token")
+        
+        if [ $? -eq 0 ] && [ -n "$response" ]; then
+            # Clear progress bar line, print success message
+            if [ "$argc_json" != 1 ] && [ "$argc_silent" != 1 ]; then
+                printf "\r\033[K"  # Clear current line
+                printf "${green}[✓]${reset} Valid token found: ${token:0:20}...\n"
+            fi
+            
             save_valid_token "$token" "$response"
-
+            
             if [ "$argc_json" != 1 ]; then
                 local username=$(echo "$response" | jq -r '.username // "N/A"')
                 local user_id=$(echo "$response" | jq -r '.id // "N/A"')
@@ -542,21 +545,26 @@ cmd_validate() {
                 local phone=$(echo "$response" | jq -r '.phone // "N/A"')
                 printf "    ${blue}User: %s (ID: %s)${reset}\n" "$username" "$user_id"
                 printf "    ${blue}Email: %s${reset}\n" "$email"
-                printf "    ${blue}Phone: %s${reset}\n\n" "$phone"
+                printf "    ${blue}Phone: %s${reset}\n" "$phone"
             fi
-
+            
             local token_result=$(echo "$response" | jq --arg token "$token" '. + {token: $token, status: "valid"}')
             results=$(echo "$results" | jq --argjson item "$token_result" '. + [$item]')
-
+            
             valid_tokens=$((valid_tokens + 1))
+            
+            # Redraw progress bar after success output
+            [ "$argc_json" != 1 ] && show_progress_bar "$current_token" "$total_tokens"
         else
-            [ "$argc_silent" != 1 ] && printf "\r${red}[✗]${reset} Invalid token: ${token:0:20}...\n"
-
+            # Just update the result for invalid tokens, don't print anything
             local token_result=$(jq -n --arg token "$token" '{token: $token, status: "invalid"}')
             results=$(echo "$results" | jq --argjson item "$token_result" '. + [$item]')
         fi
-
+        
     done < "$temp_tokens"
+    
+    # Clear the progress bar line after completion
+    [ "$argc_json" != 1 ] && [ "$argc_silent" != 1 ] && printf "\r\033[K"
 
     rm "$temp_tokens"
 
