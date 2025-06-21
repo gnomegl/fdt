@@ -94,15 +94,15 @@ save_valid_token() {
 
     case "$argc_format" in
         json)
-            filename="${argc_output}/valid_token_${timestamp}.json"
+            filename="${argc_output:-.}/valid_token_${timestamp}.json"
             echo "$response" | jq . > "$filename"
             ;;
         txt)
-            filename="${argc_output}/valid_token_${timestamp}.txt"
+            filename="${argc_output:-.}/valid_token_${timestamp}.txt"
             echo "$token" > "$filename"
             ;;
         csv)
-            filename="${argc_output}/valid_tokens.csv"
+            filename="${argc_output:-.}/valid_tokens.csv"
             if [ ! -f "$filename" ]; then
                 echo "token,username,user_id,timestamp" > "$filename"
             fi
@@ -331,7 +331,7 @@ if [ -z "$argc_command" ]; then
     exit 0
 fi
 
-mkdir -p "$argc_output"
+mkdir -p "${argc_output:-.}"
 
 case "$argc_command" in
     validate)
