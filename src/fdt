@@ -91,7 +91,6 @@ save_valid_token() {
     local timestamp=$(date +%s)
     local filename
 
-    [ "$argc_no_save" = 1 ] && return
 
     case "$argc_format" in
         json)
@@ -141,7 +140,7 @@ format_results() {
         printf "${bold}Valid tokens found:${reset} ${green}%s${reset}\n" "$valid"
         printf "${bold}Invalid tokens:${reset} ${red}%s${reset}\n" "$invalid"
 
-        if [ "$valid" -gt 0 ] && [ "$argc_no_save" != 1 ]; then
+        if [ "$valid" -gt 0 ]; then
             printf "\n${green}Valid tokens have been saved to %s format${reset}\n" "$argc_format"
         fi
     fi
