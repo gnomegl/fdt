@@ -5,16 +5,12 @@
 # @arg path "File or directory path to search for tokens" [string] @default "."
 # @option -t --token "Single token to validate directly" [string]
 # @option -o --output "Output directory for valid tokens" [string] @default "."
-# @option -f --format "Output format for valid tokens (json, txt, csv)" [string] @default "txt"
 # @flag   -r --recursive "Search recursively in directories"
 # @flag   -s --silent "Suppress loading animations"
 # @flag   -q --quiet "Suppress colored output"
 # @meta require-tools curl,rg,jq
 
 eval "$(argc --argc-eval "$0" "$@")"
-
-# Apply defaults for optional arguments
-argc_format="${argc_format:-txt}"
 
 # Setup colors
 setup_colors() {
@@ -88,50 +84,31 @@ extract_tokens() {
   echo "$temp_tokens"
 }
 
-save_valid_token() {
-  local token="$1"
-  local response="$2"
-  local timestamp=$(date +%Y-%m-%d_%H%M%S)
-  local filename
+save_results() {
+  local output_dir="${argc_output:-.}"
+  local txt_file="${output_dir}/valid_tokens.txt"
+  local json_file="${output_dir}/valid_tokens.json"
 
-  case "$argc_format" in
-  json)
-    filename="${argc_output:-.}/${timestamp}_valid_token.json"
-    echo "$response" | jq . >"$filename"
-    ;;
-  txt)
-    filename="${argc_output:-.}/${timestamp}_valid_token.txt"
-    echo "$token" >"$filename"
-    ;;
-  csv)
-    filename="${argc_output:-.}/valid_tokens.csv"
-    if [ ! -f "$filename" ]; then
-      echo "token,username,user_id,timestamp" >"$filename"
-    fi
-    local username=$(echo "$response" | jq -r '.username // "N/A"')
-    local user_id=$(echo "$response" | jq -r '.id // "N/A"')
-    echo "$token,$username,$user_id,$(date -Iseconds)" >>"$filename"
-    ;;
-  esac
+  # Write txt file: one token per line
+  printf "%s" "$VALID_TOKENS_TXT" >"$txt_file"
 
-  printf "    ${green}Token saved to: %s${reset}\n" "$filename"
+  # Write json file: array of full /users/@me responses
+  echo "$VALID_RESULTS_JSON" | jq '.' >"$json_file"
+
+  printf "    ${green}Tokens saved to: %s${reset}\n" "$txt_file"
+  printf "    ${green}Results saved to: %s${reset}\n" "$json_file"
 }
 
 format_results() {
   local total="$1"
   local valid="$2"
   local invalid="$3"
-  local results="$4"
 
   printf "\n${bold}${blue}Validation Complete${reset}\n"
   printf "${bold}${blue}==================${reset}\n"
   printf "${bold}Total tokens checked:${reset} %s\n" "$total"
   printf "${bold}Valid tokens found:${reset} ${green}%s${reset}\n" "$valid"
   printf "${bold}Invalid tokens:${reset} ${red}%s${reset}\n" "$invalid"
-
-  if [ "$valid" -gt 0 ]; then
-    printf "\n${green}Valid tokens have been saved to %s format${reset}\n" "$argc_format"
-  fi
 }
 
 show_help() {
@@ -146,12 +123,16 @@ show_help() {
   echo "  ${green}$(basename "$0") validate .${reset}                    # Validate tokens in current directory"
   echo "  ${green}$(basename "$0") validate /path/to/logs --recursive${reset} # Recursive search"
   echo "  ${green}$(basename "$0") check --token 'TOKEN_HERE'${reset}     # Check single token"
-  echo "  ${green}$(basename "$0") extract ./logs --format csv${reset}    # Extract to CSV format"
+  echo "  ${green}$(basename "$0") extract ./logs${reset}                   # Extract tokens only"
+  echo ""
+  echo "${bold}Output:${reset}"
+  echo "  Two files are always produced in the output directory:"
+  echo "    ${cyan}valid_tokens.txt${reset}   One valid token per line"
+  echo "    ${cyan}valid_tokens.json${reset}  Array of full /users/@me responses"
   echo ""
   echo "${bold}Options:${reset}"
   echo "  ${yellow}-t, --token${reset}      Single token to validate"
   echo "  ${yellow}-o, --output${reset}     Output directory for results"
-  echo "  ${yellow}-f, --format${reset}     Output format (json, txt, csv)"
   echo "  ${yellow}-r, --recursive${reset}  Search recursively"
   echo "  ${yellow}-s, --silent${reset}     Suppress loading animations"
 }
@@ -161,7 +142,10 @@ cmd_validate() {
   local temp_tokens
   local total_tokens=0
   local valid_tokens=0
-  local results="[]"
+
+  # Accumulators for output files
+  VALID_TOKENS_TXT=""
+  VALID_RESULTS_JSON="[]"
 
   printf "${bold}${blue}Discord Token Validator${reset}\n"
   printf "${bold}${blue}=======================${reset}\n\n"
@@ -184,7 +168,6 @@ cmd_validate() {
 
   # Process each token
   local current_token=0
-  local success_buffer=""
 
   # Save cursor position and clear space for progress bar
   [ "$argc_silent" != 1 ] && printf "\n"
@@ -205,8 +188,6 @@ cmd_validate() {
         printf "${green}[✓]${reset} Valid token found: ${token}\n"
       fi
 
-      save_valid_token "$token" "$response"
-
       local username=$(echo "$response" | jq -r '.username // "N/A"')
       local user_id=$(echo "$response" | jq -r '.id // "N/A"')
       local email=$(echo "$response" | jq -r '.email // "N/A"')
@@ -215,17 +196,21 @@ cmd_validate() {
       printf "    ${blue}Email: %s${reset}\n" "$email"
       printf "    ${blue}Phone: %s${reset}\n" "$phone"
 
-      local token_result=$(echo "$response" | jq --arg token "$token" '. + {token: $token, status: "valid"}')
-      results=$(echo "$results" | jq --argjson item "$token_result" '. + [$item]')
+      # Accumulate valid token for txt output
+      if [ -z "$VALID_TOKENS_TXT" ]; then
+        VALID_TOKENS_TXT="$token"
+      else
+        VALID_TOKENS_TXT="${VALID_TOKENS_TXT}
+${token}"
+      fi
+
+      # Accumulate full API response for json output
+      VALID_RESULTS_JSON=$(echo "$VALID_RESULTS_JSON" | jq --argjson item "$response" '. + [$item]')
 
       valid_tokens=$((valid_tokens + 1))
 
       # Redraw progress bar after success output
       show_progress_bar "$current_token" "$total_tokens"
-    else
-      # Just update the result for invalid tokens, don't print anything
-      local token_result=$(jq -n --arg token "$token" '{token: $token, status: "invalid"}')
-      results=$(echo "$results" | jq --argjson item "$token_result" '. + [$item]')
     fi
 
   done <"$temp_tokens"
@@ -235,7 +220,12 @@ cmd_validate() {
 
   rm "$temp_tokens"
 
-  format_results "$total_tokens" "$valid_tokens" "$((total_tokens - valid_tokens))" "$results"
+  # Save both output files if we found valid tokens
+  if [ "$valid_tokens" -gt 0 ]; then
+    save_results
+  fi
+
+  format_results "$total_tokens" "$valid_tokens" "$((total_tokens - valid_tokens))"
 }
 
 cmd_extract() {
@@ -286,7 +276,9 @@ cmd_check() {
     printf "${blue}Email: %s${reset}\n" "$email"
     printf "${blue}Phone: %s${reset}\n" "$phone"
 
-    save_valid_token "$argc_token" "$response"
+    VALID_TOKENS_TXT="$argc_token"
+    VALID_RESULTS_JSON=$(echo "[]" | jq --argjson item "$response" '. + [$item]')
+    save_results
   else
     printf "${red}[✗] Token is invalid${reset}\n"
     exit 1
