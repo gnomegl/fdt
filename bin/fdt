@@ -303,6 +303,9 @@ _argc_run "$@"
 
 # ARGC-BUILD }
 
+# Apply defaults for optional arguments
+argc_format="${argc_format:-txt}"
+
 # Setup colors
 setup_colors() {
   if [ "$argc_quiet" = 1 ] || [ -z "$TERM" ] || [ "$TERM" = "dumb" ]; then
