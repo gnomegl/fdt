@@ -5,7 +5,7 @@
 # @arg path "File or directory path to search for tokens" [string] @default "."
 # @option -t --token "Single token to validate directly" [string]
 # @option -o --output "Output directory for valid tokens" [string] @default "."
-# @option -f --format "Output format for valid tokens (json, txt, csv)" [string] @default "json"
+# @option -f --format "Output format for valid tokens (json, txt, csv)" [string] @default "txt"
 # @flag   -r --recursive "Search recursively in directories"
 # @flag   -s --silent "Suppress loading animations"
 # @flag   -q --quiet "Suppress colored output"
@@ -47,7 +47,7 @@ ARGS:
 OPTIONS:
   -t, --token <TOKEN>    "Single token to validate directly" [string]
   -o, --output <OUTPUT>  "Output directory for valid tokens" [string] @default "."
-  -f, --format <FORMAT>  "Output format for valid tokens (json, txt, csv)" [string] @default "json"
+  -f, --format <FORMAT>  "Output format for valid tokens (json, txt, csv)" [string] @default "txt"
   -r, --recursive        "Search recursively in directories"
   -s, --silent           "Suppress loading animations"
   -q, --quiet            "Suppress colored output"
@@ -378,16 +378,16 @@ extract_tokens() {
 save_valid_token() {
   local token="$1"
   local response="$2"
-  local timestamp=$(date +%s)
+  local timestamp=$(date +%Y-%m-%d_%H%M%S)
   local filename
 
   case "$argc_format" in
   json)
-    filename="${argc_output:-.}/valid_token_${timestamp}.json"
+    filename="${argc_output:-.}/${timestamp}_valid_token.json"
     echo "$response" | jq . >"$filename"
     ;;
   txt)
-    filename="${argc_output:-.}/valid_token_${timestamp}.txt"
+    filename="${argc_output:-.}/${timestamp}_valid_token.txt"
     echo "$token" >"$filename"
     ;;
   csv)
@@ -489,7 +489,7 @@ cmd_validate() {
       # Clear progress bar line, print success message
       if [ "$argc_silent" != 1 ]; then
         printf "\r\033[K" # Clear current line
-        printf "${green}[✓]${reset} Valid token found: ${token:0:20}...\n"
+        printf "${green}[✓]${reset} Valid token found: ${token}\n"
       fi
 
       save_valid_token "$token" "$response"
@@ -561,7 +561,7 @@ cmd_check() {
     exit 1
   fi
 
-  printf "${blue}Validating token: %s...${reset}\n" "${argc_token:0:20}"
+  printf "${blue}Validating token: %s${reset}\n" "${argc_token}"
 
   if response=$(validate_token "$argc_token"); then
     printf "${green}[✓] Token is valid${reset}\n"
